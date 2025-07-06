@@ -258,6 +258,346 @@ class EvidenceAggregator:
 - Backend: FastAPI
 - Database: PostgreSQL
 
+#### B. Streamlit Review Interface
+```python
+import streamlit as st
+import pandas as pd
+from datetime import datetime
+
+def create_review_interface():
+    st.title("Fake News Detection - Manual Review")
+    
+    # Sidebar filters
+    st.sidebar.header("Filters")
+    risk_filter = st.sidebar.selectbox(
+        "Risk Level", 
+        ["All", "VERY_HIGH_RISK", "HIGH_RISK", "MEDIUM_RISK", "LOW_RISK"]
+    )
+    
+    # Main content area
+    articles = load_pending_articles(risk_filter)
+    
+    for idx, article in articles.iterrows():
+        with st.expander(f"Article {article['id']}: {article['title'][:100]}..."):
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                st.write(f"**Title:** {article['title']}")
+                st.write(f"**Source:** {article['source_domain']}")
+                st.write(f"**URL:** {article['url']}")
+                st.write(f"**Content Preview:** {article['content'][:500]}...")
+                
+            with col2:
+                st.metric("Credibility Score", f"{article['credibility_score']:.2f}")
+                st.metric("Risk Level", article['risk_level'])
+                
+                # Analysis breakdown
+                st.write("**Agent Analysis:**")
+                analysis = load_analysis_results(article['id'])
+                for _, result in analysis.iterrows():
+                    st.write(f"- {result['agent_name']}: {result['score']:.2f}")
+                    st.write(f"  {result['explanation']}")
+            
+            # Review form
+            st.write("**Your Assessment:**")
+            verdict = st.radio(
+                "Verdict:", 
+                ["Real", "Fake", "Uncertain"], 
+                key=f"verdict_{article['id']}"
+            )
+            confidence = st.slider(
+                "Confidence:", 1, 5, 3, 
+                key=f"confidence_{article['id']}"
+            )
+            notes = st.text_area(
+                "Notes:", 
+                key=f"notes_{article['id']}"
+            )
+            
+            if st.button(f"Submit Review", key=f"submit_{article['id']}"):
+                save_review(article['id'], verdict, confidence, notes)
+                st.success("Review submitted!")
+```
+
+### 6. Basic Dashboard Implementation
+
+#### A. Real-time Monitoring Dashboard
+```python
+def create_monitoring_dashboard():
+    st.title("Fake News Detection - Live Dashboard")
+    
+    # Key metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_articles = get_total_articles_today()
+        st.metric("Articles Processed Today", total_articles)
+    
+    with col2:
+        high_risk_count = get_high_risk_articles_today()
+        st.metric("High Risk Articles", high_risk_count)
+    
+    with col3:
+        accuracy = get_system_accuracy()
+        st.metric("System Accuracy", f"{accuracy:.1%}")
+    
+    with col4:
+        pending_reviews = get_pending_review_count()
+        st.metric("Pending Reviews", pending_reviews)
+    
+    # Recent detections
+    st.header("Recent High-Risk Detections")
+    recent_high_risk = load_recent_high_risk_articles()
+    st.dataframe(recent_high_risk[['title', 'source_domain', 'credibility_score', 'risk_level']])
+    
+    # Trends chart
+    st.header("Detection Trends")
+    trend_data = load_detection_trends()
+    st.line_chart(trend_data)
+```
+
+### 1. Input Layer Implementation
+
+#### A. RSS Feed Integration
+**Langflow Nodes:**
+- **RSS Reader Node** (Custom Component)
+- **URL Validator Node**
+- **Content Extractor Node**
+
+**Configuration:**
+```python
+# RSS Reader Node Implementation
+import feedparser
+import requests
+from datetime import datetime
+
+class RSSFeedNode:
+    def __init__(self):
+        self.feed_urls = [
+            "https://rss.cnn.com/rss/edition.rss",
+            "https://feeds.npr.org/1001/rss.xml",
+            "https://www.politico.com/rss/politicopicks.xml"
+        ]
+    
+    def process(self):
+        articles = []
+        for url in self.feed_urls:
+            feed = feedparser.parse(url)
+            for entry in feed.entries:
+                article = {
+                    "title": entry.title,
+                    "url": entry.link,
+                    "published": entry.published,
+                    "summary": entry.summary,
+                    "source_domain": self.extract_domain(entry.link)
+                }
+                articles.append(article)
+        return articles
+```
+
+#### B. Manual Input Interface
+**Langflow Nodes:**
+- **Text Input Node**
+- **URL Input Node**
+- **Form Validation Node**
+
+### 2. Preprocessing Pipeline
+
+#### A. Text Cleaning and Normalization
+**Langflow Configuration:**
+```yaml
+Text Preprocessor Node:
+  - Remove HTML tags
+  - Normalize whitespace
+  - Handle special characters
+  - Extract key metadata (word count, caps ratio)
+```
+
+#### B. Content Classification
+**Langflow Node: Content Classifier**
+```python
+# LLM Prompt for Content Classification
+CLASSIFICATION_PROMPT = """
+Analyze the following news article and classify it into one of these categories:
+- Political
+- Entertainment/Celebrity
+- Health/Medical
+- Technology
+- Sports
+- Business/Finance
+- General News
+
+Article Title: {title}
+Article Content: {content}
+
+Respond with just the category name and confidence (0-1):
+Category: [category]
+Confidence: [confidence]
+"""
+```
+
+### 3. Core Analysis Agents
+
+#### A. Phrase Analysis Agent
+**Langflow Workflow:**
+```
+Input Text → LLM Analysis → Score Calculator → Evidence Collector
+```
+
+**LLM Prompt:**
+```python
+PHRASE_ANALYSIS_PROMPT = """
+Analyze the following news article for indicators of potentially fake news based on language patterns:
+
+Article: "{text}"
+
+Check for:
+1. Sensational teasers ("You won't believe...", "SHOCKING", etc.)
+2. Emotional manipulation language
+3. Excessive use of superlatives
+4. All-caps words or phrases
+5. Multiple exclamation marks
+6. Vague or unsubstantiated claims
+
+For each indicator found:
+- Quote the specific text
+- Explain why it's concerning
+- Rate severity (1-5)
+
+Format your response as:
+FINDINGS: [list of specific issues found]
+SEVERITY_SCORE: [1-5, where 5 is most concerning]
+EXPLANATION: [brief reasoning]
+"""
+```
+
+#### B. Language Quality Agent
+**LLM Prompt:**
+```python
+LANGUAGE_QUALITY_PROMPT = """
+Evaluate the following text for language quality issues that might indicate fake news:
+
+Text: "{text}"
+
+Analyze for:
+1. Grammar errors
+2. Spelling mistakes
+3. Awkward phrasing
+4. Inconsistent style
+5. Poor punctuation usage
+6. Non-native speaker patterns
+
+Rate each category (0-5) and provide examples:
+
+GRAMMAR_SCORE: [0-5]
+SPELLING_SCORE: [0-5] 
+STYLE_SCORE: [0-5]
+OVERALL_QUALITY: [0-5]
+EXAMPLES: [specific issues found]
+ASSESSMENT: [summary of language quality]
+"""
+```
+
+#### C. Common Sense Verification Agent
+**LLM Prompt:**
+```python
+COMMONSENSE_PROMPT = """
+Evaluate this news claim for common sense and logical consistency:
+
+Claim: "{text}"
+
+Consider:
+1. Does this contradict well-known facts?
+2. Are the claims plausible given current knowledge?
+3. Do the details make logical sense?
+4. Are there internal contradictions?
+5. Does this sound like gossip rather than news?
+
+PLAUSIBILITY: [High/Medium/Low]
+CONTRADICTIONS: [list any found]
+RED_FLAGS: [concerning elements]
+REASONING: [explain your assessment]
+"""
+```
+
+#### D. Source Credibility Agent
+**Implementation:**
+```python
+# Domain Credibility Database (simplified)
+DOMAIN_CREDIBILITY = {
+    "bbc.com": {"score": 0.95, "bias": "center"},
+    "cnn.com": {"score": 0.85, "bias": "center-left"},
+    "reuters.com": {"score": 0.95, "bias": "center"},
+    "infowars.com": {"score": 0.15, "bias": "extreme-right"},
+    # Add more domains...
+}
+
+URL_ANALYSIS_PROMPT = """
+Analyze this URL and domain for credibility indicators:
+
+URL: {url}
+Domain: {domain}
+
+Consider:
+1. Domain reputation and history
+2. Professional appearance
+3. Contact information availability
+4. About page transparency
+5. SSL certificate presence
+
+CREDIBILITY_SCORE: [0-1]
+WARNING_SIGNS: [list any concerns]
+ASSESSMENT: [brief evaluation]
+"""
+```
+
+### 4. Decision Engine Implementation
+
+#### A. Evidence Aggregation Node
+**Langflow Configuration:**
+```python
+class EvidenceAggregator:
+    def __init__(self):
+        self.weights = {
+            "phrase_analysis": 0.25,
+            "language_quality": 0.20,
+            "commonsense": 0.30,
+            "source_credibility": 0.25
+        }
+    
+    def aggregate_scores(self, evidence):
+        weighted_score = 0
+        explanations = []
+        
+        for agent, score in evidence.items():
+            if agent in self.weights:
+                weighted_score += score * self.weights[agent]
+                explanations.append(evidence[f"{agent}_explanation"])
+        
+        # Convert to credibility score (higher = more credible)
+        credibility_score = 1 - weighted_score
+        
+        return {
+            "credibility_score": credibility_score,
+            "risk_level": self.get_risk_level(credibility_score),
+            "detailed_analysis": explanations
+        }
+    
+    def get_risk_level(self, score):
+        if score >= 0.8: return "LOW_RISK"
+        elif score >= 0.6: return "MEDIUM_RISK" 
+        elif score >= 0.4: return "HIGH_RISK"
+        else: return "VERY_HIGH_RISK"
+```
+
+### 5. Manual Review Interface
+
+#### A. Review Dashboard Components
+**Technology Stack:**
+- Frontend: Streamlit or Gradio for rapid prototyping
+- Backend: FastAPI
+- Database: PostgreSQL
+
 **Database Schema:**
 ```sql
 -- Articles table
